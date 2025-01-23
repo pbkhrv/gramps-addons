@@ -31,7 +31,7 @@ register(GRAMPLET,
          gramplet_title=_("Root Ancestors"),
          detached_width = 600,
          detached_height = 400,
-         version = '0.1.0',
+         version = '0.2.0',
          gramps_target_version = "5.2",
          help_url="Descendant_Count_Gramplet",
          )
