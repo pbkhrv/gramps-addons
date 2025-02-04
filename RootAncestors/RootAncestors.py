@@ -38,6 +38,7 @@ _ = _trans.gettext
 from gramps.gui.editors import EditPerson
 from gramps.gen.simple import SimpleAccess
 from gramps.gen.errors import WindowActiveError
+from gramps.gen.lib import Person, Family, ChildRefType
 
 
 def get_fsftid(person):
@@ -45,7 +46,6 @@ def get_fsftid(person):
         if str(attr.get_type()) == "_FSFTID":
             return attr.get_value()
     return ""
-
 
 # ------------------------------------------------------------------------
 #
@@ -70,71 +70,75 @@ class RootAncestorsGramplet(Gramplet):
         count = 0
         self.model.clear()
         for person in database.iter_people():
-            # Has no parents
-            if not person.get_parent_family_handle_list():
+            root_type = self.classify_root_type(person)
+            if root_type:
                 count += 1
                 if count == 200:
                     # Why is this?
                     count = 0
                     yield True
-                root_type = self.classify_root_type(person)
                 self.model.append(
                     (
-                        person.handle,
-                        simple_a.describe(person),
-                        len(person.get_family_handle_list()),
-                        get_fsftid(person),
-                        root_type,
+                        person.handle,              # handle
+                        simple_a.describe(person),  # name
+                        root_type,                  # type
+                        person.get_gramps_id(),     # I person id
+                        get_fsftid(person),         # family search id
+                        self.get_fids_list(person), # FI family ids
                     )
                 )
         self.set_has_data(len(self.model) > 0)
         # print(time.perf_counter() - stime)
 
-    def classify_root_type(self, person):
+    def classify_root_type(self, person: Person):
         # - "Root": no parents, but has children
-        # - "Leaf": no children in any family but a spouse has children in one of their families
-        # - "Sleeper": no children, at least one spouse, but no spouses have children
+        # - "Sleeping": at least one spouse, no birth children
         # - "Detached": no parents, no family (and, by definition, no children)
-        a_spouse_has_children_in_some_family = any(
-            (spouse := self.spouse_in_family(person, family_id))
-            and self.has_children_in_any_family(spouse)
-            for family_id in person.get_family_handle_list()
-        )
+        has_parents = len(person.get_parent_family_handle_list()) > 0
+        is_married = len(person.get_family_handle_list()) > 0
+        has_biological_child = self.has_biological_child_in_some_family(person)
 
-        no_spouse_has_parents = all(
-            (spouse := self.spouse_in_family(person, family_id))
-            and not spouse.get_parent_family_handle_list()
-            for family_id in person.get_family_handle_list()
-        )
-
-        if self.has_children_in_any_family(person):
+        if not has_parents and has_biological_child:
             return "Root"
-        elif a_spouse_has_children_in_some_family:
-            return "Leaf"
-        elif (
-            len(person.get_family_handle_list()) == 1
-            and no_spouse_has_parents
-            and not a_spouse_has_children_in_some_family
-        ):
-            return "Sleeper"
-        else:
+        elif not has_parents and not is_married:
             return "Detached"
-
-    def has_children_in_any_family(self, person):
-        has_children = lambda family: len(family.get_child_ref_list()) > 0
-        return any(
-            has_children(self.dbstate.db.get_family_from_handle(family_id))
-            for family_id in person.get_family_handle_list()
-        )
-
-    def spouse_in_family(self, person, family_id):
-        family = self.dbstate.db.get_family_from_handle(family_id)
-        if family.get_father_handle() == person.get_handle() and family.get_mother_handle():
-            return self.dbstate.db.get_person_from_handle(family.get_mother_handle())
-        elif family.get_mother_handle() == person.get_handle() and family.get_father_handle():
-            return self.dbstate.db.get_person_from_handle(family.get_father_handle())
+        elif is_married and not has_biological_child:
+            return "Sleeping"
         else:
             return None
+
+    def has_biological_child_in_some_family(self, person: Person):
+        def has_biological_child_in_family(family: Family):
+            # Is person the father in this family?
+            if family.get_father_handle() == person.get_handle():
+                # find child with paternal "birth" link
+                return any(
+                    child_ref.get_father_relation() == ChildRefType.BIRTH
+                    for child_ref in family.get_child_ref_list()
+                )
+            # Is person the mother in this family?
+            elif family.get_mother_handle() == person.get_handle():
+                # find child with maternal "birth" link
+                return any(
+                    child_ref.get_mother_relation() == ChildRefType.BIRTH
+                    for child_ref in family.get_child_ref_list()
+                )
+            else:
+                return False
+
+        return any(
+            has_biological_child_in_family(
+                self.dbstate.db.get_family_from_handle(family_id)
+            )
+            for family_id in person.get_family_handle_list()
+        )
+
+    def get_fids_list(self, person: Person):
+        out = ""
+        for fh in person.get_family_handle_list():
+            family: Family = self.dbstate.db.get_family_from_handle(fh)
+            out += (", " if out else "") + family.get_gramps_id()
+        return out
 
     def db_changed(self):
         self.connect(self.dbstate.db, "person-add", self.update)
@@ -164,26 +168,32 @@ class RootAncestorsGramplet(Gramplet):
         top.append_column(column)
 
         renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(_("Families"), renderer, text=2)
+        column = Gtk.TreeViewColumn(_("Root Type"), renderer, text=2)
         column.set_sort_column_id(2)
         top.append_column(column)
 
         renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(_("FSFTID"), renderer, text=3)
+        column = Gtk.TreeViewColumn(_("PID"), renderer, text=3)
         column.set_sort_column_id(3)
         top.append_column(column)
 
         renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(_("Root Type"), renderer, text=4)
+        column = Gtk.TreeViewColumn(_("FSFTID"), renderer, text=4)
         column.set_sort_column_id(4)
+        top.append_column(column)
+
+        renderer = Gtk.CellRendererText()
+        column = Gtk.TreeViewColumn(_("FIDs"), renderer, text=5)
+        column.set_sort_column_id(5)
         top.append_column(column)
 
         self.model = Gtk.ListStore(
             str,  # handle
             str,  # name
-            int,  # family count
+            str,  # type
+            str,  # person id
             str,  # family search id
-            str,  # root type
+            str,  # family ids
         )
         top.set_model(self.model)
         return top

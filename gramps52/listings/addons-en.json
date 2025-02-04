@@ -3,8 +3,8 @@
 "n": "Root Ancestors",
 "i": "Root Ancestors Gramplet",
 "t": 0,
-"d": "Gramplet for finding persons without parents",
-"v": "0.2.0",
+"d": "Gramplet for finding connection points in family trees",
+"v": "0.3.0",
 "g": "5.2",
 "s": 3,
 "z": "RootAncestors.addon.tgz"
