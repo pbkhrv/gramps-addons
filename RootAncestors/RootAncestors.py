@@ -129,9 +129,9 @@ class RootAncestorsGramplet(Gramplet):
 
     def spouse_in_family(self, person, family_id):
         family = self.dbstate.db.get_family_from_handle(family_id)
-        if family.get_father_handle() == person.get_handle():
+        if family.get_father_handle() == person.get_handle() and family.get_mother_handle():
             return self.dbstate.db.get_person_from_handle(family.get_mother_handle())
-        elif family.get_mother_handle() == person.get_handle():
+        elif family.get_mother_handle() == person.get_handle() and family.get_father_handle():
             return self.dbstate.db.get_person_from_handle(family.get_father_handle())
         else:
             return None
